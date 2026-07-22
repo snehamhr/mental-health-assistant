@@ -1,5 +1,5 @@
 ````markdown
-# MindPal
+## MindPal
 
 MindPal is a supportive mental-health chatbot built with FastAPI, Groq, Hugging Face Inference API, local semantic retrieval artifacts, and a responsive web interface.
 
@@ -375,6 +375,3 @@ MindPal is an educational and supportive conversational tool.
 It is not intended to diagnose, treat, cure, or prevent any mental-health condition.
 
 For professional guidance, users should contact a qualified healthcare or mental-health professional.
-
-```
-```
