@@ -1,21 +1,23 @@
+````markdown
 # MindPal
 
-MindPal is a supportive mental-health chatbot built with FastAPI, Groq, local semantic retrieval, and a simple web interface.
+MindPal is a supportive mental-health chatbot built with FastAPI, Groq, Hugging Face Inference API, local semantic retrieval artifacts, and a responsive web interface.
 
-The application uses content from psychology books to retrieve relevant information and provide short, empathetic, context-aware responses.
+The application retrieves relevant information from psychology books and uses it as background context to generate short, empathetic, and context-aware responses.
 
 ## Features
 
 - Supportive mental-health conversations
 - Retrieval-Augmented Generation using psychology books
-- Local semantic search with Sentence Transformers
-- Groq-powered language model responses
+- Remote query embeddings through Hugging Face Inference API
+- Pre-generated local document embeddings
+- Groq-powered language-model responses
 - Conversation context within the current browser session
-- Crisis-message detection and safety response
+- Crisis-message detection and safety routing
 - Out-of-scope question handling
 - Responsive web interface
 - New Chat functionality
-- No permanent storage of user conversations
+- No permanent backend conversation storage
 
 ## Technology Stack
 
@@ -26,14 +28,15 @@ The application uses content from psychology books to retrieve relevant informat
 - Uvicorn
 - Groq API
 - Pydantic
+- Pydantic Settings
 
-### Retrieval Pipeline
+### Retrieval
 
-- PyMuPDF
-- Sentence Transformers
-- `all-MiniLM-L6-v2`
+- Hugging Face Inference API
+- `sentence-transformers/all-MiniLM-L6-v2`
 - NumPy
 - Pickle
+- Pre-generated document embeddings
 
 ### Frontend
 
@@ -51,42 +54,64 @@ Safety and crisis check
     ↓
 Conversation-aware retrieval query
     ↓
-Local embedding generation
+Hugging Face feature-extraction API
     ↓
-Cosine-similarity search
+384-dimensional MiniLM query embedding
     ↓
-Relevant psychology-book chunks
+Cosine similarity against stored document embeddings
+    ↓
+Top matching psychology-book chunks
     ↓
 Groq language model
     ↓
 Supportive response
-Knowledge Base
+````
+
+Only the user-query embedding is generated remotely during deployment.
+
+The psychology-book chunks and their pre-generated embeddings remain stored locally inside the application repository.
+
+This reduces deployment memory usage because Torch, Transformers, and Sentence Transformers are not loaded inside the Render web service.
+
+## Knowledge Base
 
 The knowledge base is created from PDF books stored inside:
 
+```text
 source_books/
+```
 
 The preprocessing pipeline:
 
-Opens each PDF
-Extracts text page by page
-Cleans unnecessary whitespace and broken formatting
-Divides the text into overlapping chunks
-Generates normalized MiniLM embeddings
-Saves the processed chunks and embeddings
+1. Opens each PDF
+2. Extracts text page by page
+3. Cleans unnecessary whitespace and broken formatting
+4. Divides the text into overlapping chunks
+5. Generates normalized MiniLM document embeddings
+6. Saves the processed chunks and embeddings
+7. Validates that every chunk has one corresponding embedding
 
 Generated artifacts:
 
+```text
 data/combined_chunks.pkl
 data/embeddings.npy
+```
 
 Current knowledge-base configuration:
 
-Embedding model: all-MiniLM-L6-v2
+```text
+Embedding model: sentence-transformers/all-MiniLM-L6-v2
 Embedding dimension: 384
 Chunk size: approximately 900 characters
 Chunk overlap: approximately 150 characters
-Project Structure
+```
+
+The document embeddings must be generated using the same embedding model configured for remote query embeddings.
+
+## Project Structure
+
+```text
 mindpal-chatbot/
 │
 ├── app/
@@ -116,130 +141,240 @@ mindpal-chatbot/
 ├── .gitignore
 ├── requirements.txt
 └── README.md
-Local Setup
+```
 
-Create and activate a virtual environment:
+## Local Setup
 
+Create a virtual environment:
+
+```bash
 python -m venv .venv
+```
 
-Windows:
+Activate it on Windows:
 
+```bash
 .venv\Scripts\activate
+```
 
 Install the required packages:
 
+```bash
 python -m pip install -r requirements.txt
+```
 
-For CPU-only Torch on Windows:
+## Environment Variables
 
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-Environment Variables
+Create a `.env` file in the project root.
 
-Create a .env file in the project root.
-
-Example:
+```env
+APP_NAME=MindPal
 
 GROQ_API_KEY=your_groq_api_key
 GROQ_MODEL=llama-3.1-8b-instant
 
-EMBEDDING_MODEL=all-MiniLM-L6-v2
+HF_API_KEY=your_huggingface_token
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 
 CHUNKS_PATH=data/combined_chunks.pkl
 EMBEDDINGS_PATH=data/embeddings.npy
 
 SIMILARITY_THRESHOLD=0.55
-TOP_K_RESULTS=3
-MEMORY_WINDOW=20
-RETRIEVAL_HISTORY_TURNS=3
-MAX_CONTEXT_CHARACTERS=6000
+TOP_K_RESULTS=4
+MEMORY_WINDOW=16
+RETRIEVAL_USER_TURNS=6
+MAX_USER_MESSAGE_CHARS=4000
+```
 
-The actual .env file must not be committed to GitHub.
+The actual `.env` file must not be committed to GitHub.
 
-Build the Knowledge Base
+The Hugging Face token must have permission to use inference services.
 
-Place PDF books inside:
+## Build the Knowledge Base
 
+The deployed application does not require Torch or Sentence Transformers at runtime.
+
+However, the offline knowledge-base build script uses the local embedding model to generate document embeddings.
+
+Place the PDF books inside:
+
+```text
 source_books/
+```
+
+Install the preprocessing dependencies in a local development environment:
+
+```bash
+python -m pip install sentence-transformers PyMuPDF
+```
 
 Then run:
 
+```bash
 python scripts/build_knowledge_base.py
+```
 
 The script creates:
 
+```text
 data/combined_chunks.pkl
 data/embeddings.npy
+```
 
-It also validates that the number of chunks matches the number of embedding rows.
+It also validates that:
 
-Run the Application
+* the chunk file contains usable text
+* the embedding array is two-dimensional
+* the chunk count matches the number of embedding rows
+* the embedding values are finite
+* the embedding dimension is consistent
+
+## Run the Application Locally
+
+```bash
 python -m uvicorn app.main:app --reload
+```
 
 Open:
 
+```text
 http://127.0.0.1:8000
-Conversation Memory
+```
+
+## Deployment Architecture
+
+The deployed Render service loads:
+
+* FastAPI
+* Uvicorn
+* Groq client
+* Hugging Face Inference client
+* NumPy
+* stored chunks
+* stored document embeddings
+
+The deployed service does not load:
+
+* Torch
+* Sentence Transformers
+* Transformers
+* scikit-learn
+* CUDA libraries
+
+This keeps the runtime memory footprint lower and makes deployment more suitable for a free Render web service.
+
+## Render Configuration
+
+Build command:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+```
+
+Start command:
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Recommended Python version:
+
+```text
+3.11.9
+```
+
+Required Render environment variables:
+
+```text
+APP_NAME
+GROQ_API_KEY
+GROQ_MODEL
+HF_API_KEY
+EMBEDDING_MODEL
+CHUNKS_PATH
+EMBEDDINGS_PATH
+SIMILARITY_THRESHOLD
+TOP_K_RESULTS
+MEMORY_WINDOW
+RETRIEVAL_USER_TURNS
+MAX_USER_MESSAGE_CHARS
+PYTHON_VERSION
+```
+
+## Conversation Memory
 
 MindPal does not permanently store conversations on the server.
 
-Conversation history is stored temporarily using browser sessionStorage.
+Conversation history is temporarily stored using browser `sessionStorage`.
 
 This means:
 
-Refreshing the same browser tab keeps the current conversation
-Clicking New Chat clears the current conversation
-Closing the tab ends the stored session
-Conversations are not shared between users
-Conversations are not written to a backend database
-Safety
+* Refreshing the same browser tab keeps the current conversation
+* Clicking New Chat clears the current conversation
+* Closing the browser tab ends the stored session
+* Conversations are not shared between users
+* Conversations are not written to a backend database
 
-MindPal includes a safety-routing layer for messages involving possible self-harm or immediate danger.
+## Safety
 
-For crisis-related messages, the application provides immediate safety-oriented guidance before normal retrieval or language-model generation.
+MindPal includes a rule-based safety-routing layer for messages involving possible self-harm or immediate danger.
+
+Crisis-related messages are handled before normal retrieval and language-model generation.
 
 MindPal is not a replacement for:
 
-A licensed mental-health professional
-Medical diagnosis
-Emergency services
-Crisis intervention services
-Scope
+* A licensed mental-health professional
+* Medical diagnosis
+* Emergency services
+* Crisis intervention services
+
+## Scope
 
 MindPal is designed to discuss topics such as:
 
-Anxiety
-Stress
-Depression
-Low mood
-Anger
-Emotional regulation
-Coping
-Self-esteem
-Relationships
-Feeling overwhelmed
-General psychological concepts
+* Anxiety
+* Stress
+* Depression
+* Low mood
+* Anger
+* Emotional regulation
+* Coping
+* Self-esteem
+* Relationships
+* Feeling overwhelmed
+* General psychological concepts
 
 Clearly unrelated questions may receive an out-of-scope response.
 
-Limitations
-Responses depend on the quality of the uploaded psychology books
-PDF extraction may skip image-only or scanned pages
-Retrieved content may include formatting artifacts from the original books
-The chatbot may make mistakes
-The application does not provide clinical diagnosis
-Crisis detection is rule-based and may not identify every possible situation
-Privacy
+## Limitations
 
-MindPal does not intentionally store chat conversations in a permanent backend database.
+* Responses depend on the quality of the psychology books
+* Image-only or scanned PDF pages may not be extracted
+* PDF formatting may introduce text artifacts
+* Remote embedding generation depends on Hugging Face service availability
+* Groq response generation depends on Groq API availability
+* The chatbot may make mistakes
+* The application does not provide clinical diagnosis
+* Crisis detection is rule-based and may not identify every situation
+* Free Render services may sleep after inactivity and take time to restart
 
-The browser temporarily stores the current session so the conversation remains available after refreshing the same tab.
+## Privacy
+
+MindPal does not intentionally store conversations in a permanent backend database.
+
+The current conversation is stored temporarily inside the user’s browser tab.
 
 Users should avoid sharing highly sensitive personal or identifying information.
 
-Disclaimer
+API keys are stored as environment variables and are not exposed in the frontend.
+
+## Disclaimer
 
 MindPal is an educational and supportive conversational tool.
 
 It is not intended to diagnose, treat, cure, or prevent any mental-health condition.
 
 For professional guidance, users should contact a qualified healthcare or mental-health professional.
+
+```
+```
