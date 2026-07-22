@@ -1,154 +1,245 @@
-# MindHaven
+# MindPal
 
-A deployment-friendly mental-health RAG chatbot with a polished website UI,
-FastAPI backend, OpenAI generation, strict similarity routing, local chat
-history, and lightweight profile memory.
+MindPal is a supportive mental-health chatbot built with FastAPI, Groq, local semantic retrieval, and a simple web interface.
 
-## What was preserved from the notebook
+The application uses content from psychology books to retrieve relevant information and provide short, empathetic, context-aware responses.
 
-- `all-MiniLM-L6-v2` query embeddings
-- Existing `combined_chunks.pkl`
-- Existing `embeddings.npy`
-- Cosine-similarity retrieval
-- Top-4 retrieved chunks
-- A configurable relevance threshold
-- Mental-health-only scope
+## Features
 
-The notebook's TinyLlama response generator is replaced with the OpenAI API.
-The heavy emotion-classification pipeline is intentionally removed for easier
-CPU deployment. The OpenAI model receives the retrieved context, recent
-conversation, and explicit user memory.
+- Supportive mental-health conversations
+- Retrieval-Augmented Generation using psychology books
+- Local semantic search with Sentence Transformers
+- Groq-powered language model responses
+- Conversation context within the current browser session
+- Crisis-message detection and safety response
+- Out-of-scope question handling
+- Responsive web interface
+- New Chat functionality
+- No permanent storage of user conversations
 
-## Important routing behavior
+## Technology Stack
 
-1. Crisis language receives an immediate static safety response.
-2. The query embedding is compared with the stored embeddings.
-3. When the best score is below `SIMILARITY_THRESHOLD`, the backend returns the
-   fixed out-of-context message.
-4. In that low-similarity branch, **the OpenAI API is not called**.
-5. Only relevant messages reach OpenAI with retrieved context.
+### Backend
 
-## Chat memory without sign-in
+- Python
+- FastAPI
+- Uvicorn
+- Groq API
+- Pydantic
 
-Chats and explicit profile details are stored in browser `localStorage`.
+### Retrieval Pipeline
 
-For example:
+- PyMuPDF
+- Sentence Transformers
+- `all-MiniLM-L6-v2`
+- NumPy
+- Pickle
 
-- `My name is Sneha`
-- `I am a girl`
-- `My pronouns are she/her`
-- `Please remember that I prefer short exercises`
+### Frontend
 
-After refresh, the same browser can restore chats and memory. This is not an
-account system: data does not sync to another browser/device and is lost if the
-user clears browser storage. The UI includes buttons to clear chats and memory.
+- HTML
+- CSS
+- JavaScript
+- Browser `sessionStorage`
 
-## Project structure
+## How MindPal Works
 
 ```text
-mindhaven-chatbot/
+User message
+    ↓
+Safety and crisis check
+    ↓
+Conversation-aware retrieval query
+    ↓
+Local embedding generation
+    ↓
+Cosine-similarity search
+    ↓
+Relevant psychology-book chunks
+    ↓
+Groq language model
+    ↓
+Supportive response
+Knowledge Base
+
+The knowledge base is created from PDF books stored inside:
+
+source_books/
+
+The preprocessing pipeline:
+
+Opens each PDF
+Extracts text page by page
+Cleans unnecessary whitespace and broken formatting
+Divides the text into overlapping chunks
+Generates normalized MiniLM embeddings
+Saves the processed chunks and embeddings
+
+Generated artifacts:
+
+data/combined_chunks.pkl
+data/embeddings.npy
+
+Current knowledge-base configuration:
+
+Embedding model: all-MiniLM-L6-v2
+Embedding dimension: 384
+Chunk size: approximately 900 characters
+Chunk overlap: approximately 150 characters
+Project Structure
+mindpal-chatbot/
+│
 ├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── llm.py
 │   ├── main.py
 │   ├── rag.py
-│   ├── llm.py
-│   ├── memory.py
 │   ├── safety.py
-│   ├── config.py
 │   ├── schemas.py
+│   │
 │   └── static/
 │       ├── index.html
 │       ├── styles.css
 │       └── app.js
+│
 ├── data/
 │   ├── combined_chunks.pkl
 │   └── embeddings.npy
+│
 ├── scripts/
-│   └── validate_artifacts.py
+│   └── build_knowledge_base.py
+│
+├── source_books/
+│
 ├── .env.example
-├── Dockerfile
-├── render.yaml
-└── requirements.txt
-```
+├── .gitignore
+├── requirements.txt
+└── README.md
+Local Setup
 
-## Local setup on Windows Command Prompt
+Create and activate a virtual environment:
 
-### 1. Copy notebook artifacts
+python -m venv .venv
 
-Copy your existing files into `data/`:
+Windows:
 
-```text
+.venv\Scripts\activate
+
+Install the required packages:
+
+python -m pip install -r requirements.txt
+
+For CPU-only Torch on Windows:
+
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+Environment Variables
+
+Create a .env file in the project root.
+
+Example:
+
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=llama-3.1-8b-instant
+
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+CHUNKS_PATH=data/combined_chunks.pkl
+EMBEDDINGS_PATH=data/embeddings.npy
+
+SIMILARITY_THRESHOLD=0.55
+TOP_K_RESULTS=3
+MEMORY_WINDOW=20
+RETRIEVAL_HISTORY_TURNS=3
+MAX_CONTEXT_CHARACTERS=6000
+
+The actual .env file must not be committed to GitHub.
+
+Build the Knowledge Base
+
+Place PDF books inside:
+
+source_books/
+
+Then run:
+
+python scripts/build_knowledge_base.py
+
+The script creates:
+
 data/combined_chunks.pkl
 data/embeddings.npy
-```
 
-### 2. Create and activate an environment
+It also validates that the number of chunks matches the number of embedding rows.
 
-```cmd
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Create `.env`
-
-```cmd
-copy .env.example .env
-```
-
-Edit `.env` and add the real key:
-
-```env
-OPENAI_API_KEY=your_real_key
-```
-
-### 4. Validate the artifacts
-
-```cmd
-python scripts\validate_artifacts.py
-```
-
-### 5. Run
-
-```cmd
-uvicorn app.main:app --reload
-```
+Run the Application
+python -m uvicorn app.main:app --reload
 
 Open:
 
-```text
 http://127.0.0.1:8000
-```
+Conversation Memory
 
-## Threshold
+MindPal does not permanently store conversations on the server.
 
-Default:
+Conversation history is stored temporarily using browser sessionStorage.
 
-```env
-SIMILARITY_THRESHOLD=0.55
-```
+This means:
 
-Test the threshold against known in-scope and out-of-scope questions before
-final deployment. A higher threshold rejects more questions. A lower threshold
-allows more questions through.
+Refreshing the same browser tab keeps the current conversation
+Clicking New Chat clears the current conversation
+Closing the tab ends the stored session
+Conversations are not shared between users
+Conversations are not written to a backend database
+Safety
 
-## Render deployment
+MindPal includes a safety-routing layer for messages involving possible self-harm or immediate danger.
 
-1. Push this project to a private GitHub repository.
-2. Keep `combined_chunks.pkl` and `embeddings.npy` in the repository if their
-   size and licensing permit it.
-3. In Render, create a new Blueprint from the repository. `render.yaml` will be
-   detected.
-4. Add `OPENAI_API_KEY` as a secret environment variable.
-5. Deploy.
+For crisis-related messages, the application provides immediate safety-oriented guidance before normal retrieval or language-model generation.
 
-The Docker image downloads `all-MiniLM-L6-v2` while building, reducing cold
-start time. One Gunicorn worker is intentional so the embedding model and
-matrix are not duplicated in memory.
+MindPal is not a replacement for:
 
-## Security
+A licensed mental-health professional
+Medical diagnosis
+Emergency services
+Crisis intervention services
+Scope
 
-- Never put the OpenAI API key in frontend JavaScript.
-- Never commit `.env`.
-- The backend uses `store=False` for OpenAI responses.
-- Browser chat history remains local to the user's browser.
-- The chatbot clearly states that it is not emergency or professional care.
+MindPal is designed to discuss topics such as:
+
+Anxiety
+Stress
+Depression
+Low mood
+Anger
+Emotional regulation
+Coping
+Self-esteem
+Relationships
+Feeling overwhelmed
+General psychological concepts
+
+Clearly unrelated questions may receive an out-of-scope response.
+
+Limitations
+Responses depend on the quality of the uploaded psychology books
+PDF extraction may skip image-only or scanned pages
+Retrieved content may include formatting artifacts from the original books
+The chatbot may make mistakes
+The application does not provide clinical diagnosis
+Crisis detection is rule-based and may not identify every possible situation
+Privacy
+
+MindPal does not intentionally store chat conversations in a permanent backend database.
+
+The browser temporarily stores the current session so the conversation remains available after refreshing the same tab.
+
+Users should avoid sharing highly sensitive personal or identifying information.
+
+Disclaimer
+
+MindPal is an educational and supportive conversational tool.
+
+It is not intended to diagnose, treat, cure, or prevent any mental-health condition.
+
+For professional guidance, users should contact a qualified healthcare or mental-health professional.
