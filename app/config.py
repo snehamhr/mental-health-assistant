@@ -11,13 +11,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    """
-    Application configuration loaded from environment variables and `.env`.
-
-    Environment-variable names are case-insensitive because
-    `case_sensitive=False` is configured below.
-    """
-
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
@@ -25,16 +18,23 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    app_name: str = "MindHaven"
+    app_name: str = "MindPal"
 
     groq_api_key: str = Field(
         default="",
         repr=False,
     )
 
+    hf_api_key: str = Field(
+        default="",
+        repr=False,
+    )
+
     groq_model: str = "llama-3.1-8b-instant"
 
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = (
+        "sentence-transformers/all-MiniLM-L6-v2"
+    )
 
     chunks_path: Path = (
         BASE_DIR
@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     )
 
     @field_validator(
+        "app_name",
         "groq_model",
         "embedding_model",
         mode="before",
@@ -74,26 +75,45 @@ class Settings(BaseSettings):
         cls,
         value: object,
     ) -> str:
-        """
-        Ensure required model names are non-empty strings.
-        """
-
         if not isinstance(
             value,
             str,
         ):
             raise ValueError(
-                "Model names must be strings."
+                "This configuration value must be a string."
             )
 
         cleaned = value.strip()
 
         if not cleaned:
             raise ValueError(
-                "Model names cannot be empty."
+                "This configuration value cannot be empty."
             )
 
         return cleaned
+
+    @field_validator(
+        "groq_api_key",
+        "hf_api_key",
+        mode="before",
+    )
+    @classmethod
+    def clean_secret_string(
+        cls,
+        value: object,
+    ) -> str:
+        if value is None:
+            return ""
+
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise ValueError(
+                "API keys must be strings."
+            )
+
+        return value.strip()
 
     @field_validator(
         "similarity_threshold",
@@ -103,10 +123,6 @@ class Settings(BaseSettings):
         cls,
         value: float,
     ) -> float:
-        """
-        Cosine-similarity threshold must remain between -1 and 1.
-        """
-
         numeric_value = float(
             value
         )
@@ -132,10 +148,6 @@ class Settings(BaseSettings):
         cls,
         value: int,
     ) -> int:
-        """
-        Validate positive integer configuration values.
-        """
-
         numeric_value = int(
             value
         )
@@ -160,15 +172,6 @@ class Settings(BaseSettings):
         cls,
         value: object,
     ) -> Path:
-        """
-        Resolve relative artifact paths against the project root.
-
-        This allows `.env` values such as:
-
-        CHUNKS_PATH=data/combined_chunks.pkl
-        EMBEDDINGS_PATH=data/embeddings.npy
-        """
-
         path = Path(
             str(value)
         ).expanduser()
@@ -186,8 +189,4 @@ class Settings(BaseSettings):
     maxsize=1,
 )
 def get_settings() -> Settings:
-    """
-    Create and cache one application settings instance.
-    """
-
     return Settings()

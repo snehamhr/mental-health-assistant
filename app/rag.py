@@ -7,70 +7,36 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 
 from app.config import Settings
 
 
-logger = logging.getLogger("mindhaven")
+logger = logging.getLogger("mindpal")
 
 
 @dataclass(frozen=True)
 class RetrievalResult:
-    """
-    One retrieved knowledge-base passage.
-
-    Attributes
-    ----------
-    index:
-        Position of the passage inside the stored chunk list.
-
-    text:
-        Retrieved passage text.
-
-    similarity:
-        Cosine-similarity score between the user query and the passage.
-    """
-
     index: int
     text: str
     similarity: float
 
 
 class RAGEngine:
-    """
-    Lightweight CPU-based semantic retrieval engine.
-
-    The engine loads:
-
-    - `all-MiniLM-L6-v2` for query embeddings;
-    - pre-generated text chunks from `combined_chunks.pkl`;
-    - pre-generated embeddings from `embeddings.npy`.
-
-    The large language model is not loaded locally. Only the small embedding
-    model runs on the local CPU.
-    """
-
     def __init__(
         self,
         settings: Settings,
     ) -> None:
         self.settings = settings
 
-        self.model: SentenceTransformer | None = None
+        self.client: InferenceClient | None = None
         self.chunks: list[str] = []
         self.embeddings: np.ndarray | None = None
 
-        self.ready: bool = False
+        self.ready = False
 
 
     def load(self) -> None:
-        """
-        Load the embedding model and RAG artifacts.
-
-        This method is called once during FastAPI startup.
-        """
-
         self.ready = False
 
         chunks_path = Path(
@@ -85,6 +51,15 @@ class RAGEngine:
             chunks_path=chunks_path,
             embeddings_path=embeddings_path,
         )
+
+        hf_api_key = self._clean_text(
+            self.settings.hf_api_key
+        )
+
+        if not hf_api_key:
+            raise ValueError(
+                "HF_API_KEY is missing."
+            )
 
         logger.info(
             "Loading knowledge-base chunks from %s",
@@ -118,28 +93,25 @@ class RAGEngine:
             embeddings=embeddings,
         )
 
-        logger.info(
-            "Loading SentenceTransformer model: %s",
-            self.settings.embedding_model,
-        )
-
-        model = SentenceTransformer(
-            self.settings.embedding_model,
-            device="cpu",
+        client = InferenceClient(
+            provider="hf-inference",
+            api_key=hf_api_key,
         )
 
         self.chunks = chunks
         self.embeddings = embeddings
-        self.model = model
+        self.client = client
         self.ready = True
 
         logger.info(
             (
                 "RAG engine ready | chunks=%d | "
-                "embedding_dimension=%d"
+                "embedding_dimension=%d | "
+                "remote_embedding_model=%s"
             ),
             len(self.chunks),
             int(self.embeddings.shape[1]),
+            self._get_embedding_model_id(),
         )
 
 
@@ -148,24 +120,6 @@ class RAGEngine:
         query: str,
         top_k: int | None = None,
     ) -> list[RetrievalResult]:
-        """
-        Retrieve the most relevant knowledge-base passages.
-
-        Parameters
-        ----------
-        query:
-            Current retrieval query. The application may combine several recent
-            user messages so short follow-ups retain conversational context.
-
-        top_k:
-            Number of passages to return. Defaults to the configured value.
-
-        Returns
-        -------
-        list[RetrievalResult]
-            Results sorted from highest to lowest similarity.
-        """
-
         self._ensure_ready()
 
         cleaned_query = self._clean_text(
@@ -221,15 +175,32 @@ class RAGEngine:
         return results
 
 
+    def _get_embedding_model_id(
+        self,
+    ) -> str:
+        model_name = self._clean_text(
+            self.settings.embedding_model
+        )
+
+        if not model_name:
+            raise ValueError(
+                "EMBEDDING_MODEL is missing."
+            )
+
+        if "/" in model_name:
+            return model_name
+
+        return (
+            "sentence-transformers/"
+            f"{model_name}"
+        )
+
+
     def _validate_artifact_paths(
         self,
         chunks_path: Path,
         embeddings_path: Path,
     ) -> None:
-        """
-        Confirm that required RAG files exist before loading.
-        """
-
         missing_files: list[str] = []
 
         if not chunks_path.exists():
@@ -251,9 +222,7 @@ class RAGEngine:
             raise FileNotFoundError(
                 (
                     "Required RAG artifact files were not found:\n"
-                    f"{missing_text}\n\n"
-                    "Place the two PDF books in source_books/ and run:\n"
-                    "python scripts/build_knowledge_base.py"
+                    f"{missing_text}"
                 )
             )
 
@@ -262,13 +231,11 @@ class RAGEngine:
         self,
         path: Path,
     ) -> Any:
-        """
-        Load the serialized chunk object.
-        """
-
         try:
             with path.open("rb") as file:
-                return pickle.load(file)
+                return pickle.load(
+                    file
+                )
 
         except Exception as exc:
             raise RuntimeError(
@@ -283,17 +250,6 @@ class RAGEngine:
         self,
         raw_chunks: Any,
     ) -> list[str]:
-        """
-        Convert supported chunk structures into a clean list of strings.
-
-        Supported stored formats include:
-
-        - list[str]
-        - list[dict] where text is stored under keys such as:
-          `text`, `content`, `chunk`, or `page_content`
-        - pandas-like objects convertible with `.tolist()`
-        """
-
         if hasattr(
             raw_chunks,
             "tolist",
@@ -354,10 +310,6 @@ class RAGEngine:
         self,
         item: Any,
     ) -> str:
-        """
-        Extract text from one stored chunk item.
-        """
-
         if isinstance(
             item,
             str,
@@ -430,13 +382,6 @@ class RAGEngine:
         self,
         raw_embeddings: np.ndarray,
     ) -> np.ndarray:
-        """
-        Validate and L2-normalize stored embeddings.
-
-        With normalized vectors, cosine similarity is simply a matrix-vector
-        dot product, which is fast on CPU.
-        """
-
         embeddings = np.asarray(
             raw_embeddings,
             dtype=np.float32,
@@ -520,10 +465,6 @@ class RAGEngine:
         chunks: list[str],
         embeddings: np.ndarray,
     ) -> None:
-        """
-        Confirm that every text chunk has exactly one embedding.
-        """
-
         chunk_count = len(
             chunks
         )
@@ -540,9 +481,7 @@ class RAGEngine:
                 (
                     "Knowledge-base artifact mismatch: "
                     f"{chunk_count} text chunks but "
-                    f"{embedding_count} embedding rows.\n"
-                    "Rebuild both files together using:\n"
-                    "python scripts/build_knowledge_base.py"
+                    f"{embedding_count} embedding rows."
                 )
             )
 
@@ -551,34 +490,54 @@ class RAGEngine:
         self,
         query: str,
     ) -> np.ndarray:
-        """
-        Encode and normalize one retrieval query on CPU.
-        """
-
-        if self.model is None:
+        if self.client is None:
             raise RuntimeError(
                 (
-                    "The embedding model is not loaded."
+                    "The Hugging Face inference "
+                    "client is not initialized."
                 )
             )
 
-        encoded = self.model.encode(
-            query,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+        model_id = self._get_embedding_model_id()
+
+        try:
+            encoded = self.client.feature_extraction(
+                query,
+                model=model_id,
+                normalize=True,
+                truncate=True,
+            )
+
+        except Exception as exc:
+            logger.exception(
+                (
+                    "Hugging Face query embedding "
+                    "request failed."
+                )
+            )
+
+            raise RuntimeError(
+                (
+                    "Could not generate the query "
+                    "embedding. Please try again."
+                )
+            ) from exc
 
         query_embedding = np.asarray(
             encoded,
             dtype=np.float32,
-        ).reshape(-1)
+        )
+
+        query_embedding = np.squeeze(
+            query_embedding
+        )
 
         if query_embedding.ndim != 1:
             raise ValueError(
                 (
-                    "The query embedding has an "
-                    "unexpected shape."
+                    "The remote query embedding has "
+                    f"an unexpected shape: "
+                    f"{query_embedding.shape}"
                 )
             )
 
@@ -611,6 +570,14 @@ class RAGEngine:
             / norm
         )
 
+        if self.embeddings is None:
+            raise RuntimeError(
+                (
+                    "The stored embedding matrix "
+                    "is not loaded."
+                )
+            )
+
         expected_dimension = int(
             self.embeddings.shape[1]
         )
@@ -626,11 +593,10 @@ class RAGEngine:
             raise ValueError(
                 (
                     "Embedding dimension mismatch: "
-                    f"query model produced {actual_dimension}, "
-                    f"but stored embeddings use "
-                    f"{expected_dimension} dimensions.\n"
-                    "Rebuild the knowledge base using the "
-                    "same EMBEDDING_MODEL configured in .env."
+                    f"remote model produced "
+                    f"{actual_dimension}, but stored "
+                    f"embeddings use "
+                    f"{expected_dimension} dimensions."
                 )
             )
 
@@ -645,13 +611,6 @@ class RAGEngine:
         scores: np.ndarray,
         top_k: int,
     ) -> np.ndarray:
-        """
-        Return indices of the highest similarity scores.
-
-        `argpartition` avoids fully sorting the entire knowledge base when only
-        a few top passages are needed.
-        """
-
         scores = np.asarray(
             scores,
             dtype=np.float32,
@@ -686,10 +645,6 @@ class RAGEngine:
         self,
         value: str,
     ) -> str:
-        """
-        Normalize whitespace without changing the meaning of the text.
-        """
-
         if not isinstance(
             value,
             str,
@@ -704,10 +659,6 @@ class RAGEngine:
     def _ensure_ready(
         self,
     ) -> None:
-        """
-        Prevent retrieval before successful startup loading.
-        """
-
         if not self.ready:
             raise RuntimeError(
                 (
@@ -715,10 +666,11 @@ class RAGEngine:
                 )
             )
 
-        if self.model is None:
+        if self.client is None:
             raise RuntimeError(
                 (
-                    "The embedding model is not loaded."
+                    "The Hugging Face inference "
+                    "client is not initialized."
                 )
             )
 
