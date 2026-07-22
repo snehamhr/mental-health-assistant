@@ -1,0 +1,17 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+gunicorn==23.0.0
+
+groq==0.31.0
+
+numpy==1.26.4
+scikit-learn==1.7.1
+
+sentence-transformers==5.1.0
+transformers==4.56.1
+
+pydantic==2.11.7
+pydantic-settings==2.10.1
+python-dotenv==1.1.1
+
+PyMuPDF==1.26.3

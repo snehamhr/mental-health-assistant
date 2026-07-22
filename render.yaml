@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: mindhaven-chatbot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: SIMILARITY_THRESHOLD
+        value: "0.55"
+      - key: TOP_K_RESULTS
+        value: "4"
+      - key: MEMORY_WINDOW
+        value: "16"
+      - key: RETRIEVAL_USER_TURNS
+        value: "6"
